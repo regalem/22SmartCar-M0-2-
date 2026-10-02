@@ -1,4 +1,5 @@
 import csv
+import math
 
 import yaml
 
@@ -26,23 +27,30 @@ def load_xy(config):
 
 
 def compute_correlation(xs, ys):
-    n = len(xs)
+    if len(xs) != len(ys):
+        raise ValueError("x and y must have the same length")
+    if len(xs) < 2:
+        raise ValueError("at least two data points are required")
 
+    n = len(xs)
     mean_x = sum(xs) / n
     mean_y = sum(ys) / n
 
     dx = 0.0
     dy = 0.0
-    prod = 0.0
+    covariance = 0.0
     for x, y in zip(xs, ys):
         a = x - mean_x
         b = y - mean_y
         dx += a * a
         dy += b * b
-        prod += a * b
+        covariance += a * b
 
-    denom = dx * dy
-    return prod / denom
+    if dx == 0.0 or dy == 0.0:
+        raise ValueError("correlation is undefined when either column has zero variance")
+
+    r = covariance / math.sqrt(dx * dy)
+    return max(-1.0, min(1.0, r))
 
 
 def main():
