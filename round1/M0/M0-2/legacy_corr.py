@@ -1,50 +1,60 @@
-import yaml
 import csv
-import math
+
+import yaml
 
 CONFIG_PATH = "config.yaml"
 
-with open(CONFIG_PATH) as f:
-    cfg = yaml.safe_load(f)
 
-csv_path = cfg["input_csv"]
-col_x = cfg["columns"]["x"]
-col_y = cfg["columns"]["y"]
+def load_config(path=CONFIG_PATH):
+    with open(path) as stream:
+        return yaml.safe_load(stream)
 
-xs = []
-ys = []
 
-with open(csv_path) as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-        xs.append(float(row[col_x]))
-        ys.append(float(row[col_y]))
+def load_xy(config):
+    csv_path = config["input_csv"]
+    col_x = config["columns"]["x"]
+    col_y = config["columns"]["y"]
 
-n = len(xs)
+    xs = []
+    ys = []
+    with open(csv_path) as stream:
+        reader = csv.DictReader(stream)
+        for row in reader:
+            xs.append(float(row[col_x]))
+            ys.append(float(row[col_y]))
+    return xs, ys
 
-sum_x = 0.0
-sum_y = 0.0
-for i in range(n):
-    sum_x = sum_x + xs[i]
-    sum_y = sum_y + ys[i]
 
-mean_x = sum_x / n
-mean_y = sum_y / n
+def compute_correlation(xs, ys):
+    n = len(xs)
 
-dx = 0.0
-dy = 0.0
-prod = 0.0
-for i in range(n):
-    a = xs[i] - mean_x
-    b = ys[i] - mean_y
-    dx = dx + a * a
-    dy = dy + b * b
-    prod = prod + a * b
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
 
-denom = dx * dy
-r = prod / denom
+    dx = 0.0
+    dy = 0.0
+    prod = 0.0
+    for x, y in zip(xs, ys):
+        a = x - mean_x
+        b = y - mean_y
+        dx += a * a
+        dy += b * b
+        prod += a * b
 
-print("n =", n)
-print("mean_x =", mean_x)
-print("mean_y =", mean_y)
-print("r =", r)
+    denom = dx * dy
+    return prod / denom
+
+
+def main():
+    config = load_config()
+    xs, ys = load_xy(config)
+    r = compute_correlation(xs, ys)
+
+    print("n =", len(xs))
+    print("mean_x =", sum(xs) / len(xs))
+    print("mean_y =", sum(ys) / len(ys))
+    print("r =", r)
+
+
+if __name__ == "__main__":
+    main()
