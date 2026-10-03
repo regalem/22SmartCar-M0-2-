@@ -66,11 +66,13 @@ for t, v in zip(times, data):
 print("剔除离群值 %d 条" % (len(data) - len(cleaned)))
 # --- 输出清洗后的数据 ---
 output_path = OUTPUT_FILE  # 默认写到当前工作目录
-f = open(output_path, "w")
-writer = csv.writer(f)
-writer.writerow(["time", "value"])
-for v in cleaned:
-    writer.writerow([v])
+# newline="" 交给 csv 模块处理换行，避免 Windows 上出现空行；
+# 同时写出 time 和 value 两列，而不是只写 value。
+with open(output_path, "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow(["time", "value"])
+    for t, v in zip(cleaned_times, cleaned):
+        writer.writerow([t, v])
 
 print("均值 mean = %.4f" % mean)
 print("标准差 std = %.4f" % std)
