@@ -54,10 +54,16 @@ for v in data:
 std = math.sqrt(acc / len(data))
 
 # --- 剔除离群值 ---
-for v in data:
-    if v > mean + 2 * std:
-        data.remove(v)
+# 用绝对偏差判定，同时剔除偏大和偏小的离群值；
+# 遍历时构造新列表，避免边遍历边修改 data。
+cleaned = []
+cleaned_times = []
+for t, v in zip(times, data):
+    if abs(v - mean) <= 2 * std:
+        cleaned.append(v)
+        cleaned_times.append(t)
 
+print("剔除离群值 %d 条" % (len(data) - len(cleaned)))
 # --- 输出清洗后的数据 ---
 output_path = OUTPUT_FILE  # 默认写到当前工作目录
 f = open(output_path, "w")
