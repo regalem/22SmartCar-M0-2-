@@ -3,7 +3,7 @@
 > - **难度**：★
 > - **主环境**：VMware Workstation + Ubuntu 22.04.5 LTS
 > - **验收结果**：`PASS=30`、`FAIL=0`、`WARN=2`
-> - **当前状态**：环境验收已通过；真实远程登录和本地 `origin` 绑定待完成
+> - **当前状态**：环境验收已通过，README 已上传 GitHub；真实远程登录待完成
 
 ## 1. 任务概述
 
@@ -42,7 +42,7 @@ M0-1 要求在三选一环境中完成 Ubuntu、ROS2、Python 虚拟环境、C/C
 | :--- | :---: | :--- |
 | 1. 安装 Ubuntu、ROS2、Python 虚拟环境、C/C++、VS Code、Git | 已完成 | VMware 环境运行官方检查脚本后 `FAIL=0` |
 | 2. 编写 README 和本机踩坑实录 | 已完成 | 本文档 |
-| 3. 创建本地和云端 Git 仓库，并按模块、题目组织 | 部分完成 | 本地仓库有 6 次提交，GitHub 仓库已创建；本地仓库尚未配置 `origin` |
+| 3. 创建本地和云端 Git 仓库，并按模块、题目组织 | 已完成 | 本地仓库与 GitHub `origin/main` 已同步，目录包含 `M0/M0-1` 和 `M0/M0-2` |
 | 4. 学会 SSH、SCP/rsync 和 SSH Key 远程操作 | 工具已准备，实操待完成 | 公钥已生成，但 `known_hosts` 为空，尚未真实登录开发板或服务器 |
 
 ## 4. 验收证据
@@ -66,7 +66,7 @@ bash M0/M0-1/check_env.sh --fix
 两个 WARN 均已保留，没有通过伪造文件消除：
 
 1. `known_hosts` 为空：工具和公钥已经准备好，但尚未连接真实开发板或服务器。
-2. 官方仓库使用 `round1/M0/...`，而检查脚本期望个人仓库根目录直接使用 `M0/...`。本 README 已放入个人仓库的 `M0/M0-1/`，后续推送后该结构警告应消失。
+2. 官方仓库使用 `round1/M0/...`，而检查脚本期望个人仓库根目录直接使用 `M0/...`。本 README 已推送到个人仓库的 `M0/M0-1/`；重新运行检查脚本后可验证该结构警告是否消失。
 
 ### 4.2 系统和工具链
 
@@ -167,7 +167,7 @@ git config --global user.email
 git log --oneline --decorate
 ```
 
-个人 M0-2 仓库当前有 6 次提交：
+个人仓库最初有 6 次 M0-2 提交：
 
 ```text
 6ef5d62 docs: document usage input format and output meaning
@@ -366,23 +366,18 @@ FAIL=0
 环境验收: 通过
 ```
 
-## 7. 待办与下一步
+## 7. Git 上传记录与待办
 
-1. 将本 README 推送到个人 GitHub 仓库：
+Git 上传已完成：
 
-   ```text
-   https://github.com/regalem/22SmartCar-M0-2-
-   ```
+- GitHub 仓库：https://github.com/regalem/22SmartCar-M0-2-
+- 远端：`origin` 指向该仓库
+- 分支：`main` 跟踪 `origin/main`
+- 远端文件：`M0/M0-1/README.md`
 
-   当前 Windows 本地仓库没有配置 `origin`。绑定前先核对远端地址：
+剩余待办：
 
-   ```bash
-   git remote add origin <个人仓库 HTTPS 或 SSH 地址>
-   git remote -v
-   git push -u origin main
-   ```
-
-2. 使用已经生成的 SSH 公钥登录真实开发板或服务器，完成 M0-1 第 4 项：
+1. 使用已经生成的 SSH 公钥登录真实开发板或服务器，完成 M0-1 第 4 项：
 
    ```bash
    ssh-keygen -t ed25519 -C "you@example.com"
@@ -397,13 +392,13 @@ FAIL=0
    test -s ~/.ssh/known_hosts && echo "remote login evidence OK"
    ```
 
-3. 在个人仓库根目录再次运行官方 `check_env.sh --fix`。官方脚本不应提交到个人仓库时，可临时放入 `M0/M0-1/`，验收完成后删除：
+2. 在个人仓库根目录再次运行官方 `check_env.sh --fix`。官方脚本不应提交到个人仓库时，可临时放入 `M0/M0-1/`，验收完成后删除：
 
    ```bash
    bash M0/M0-1/check_env.sh --fix
    ```
 
-4. 将最终验收输出、实际登录的开发板类型和连接日期追加到本文档。没有真实连接前，不伪造 `known_hosts`，也不把远程登录标记为已完成。
+3. 将最终验收输出、实际登录的开发板类型和连接日期追加到本文档。没有真实连接前，不伪造 `known_hosts`，也不把远程登录标记为已完成。
 
 ## 8. AI 使用说明
 
