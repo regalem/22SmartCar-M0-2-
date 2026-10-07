@@ -7,6 +7,11 @@
 并在运行结束后输出结构化报告 report.json。
 
 纯终端运行，不依赖 ROS 或 GUI。
+
+YAML 支持：
+  - 装有 PyYAML 时使用 PyYAML（功能最全，推荐）；
+  - 没有 PyYAML 时自动启用内置后备解析器，仍可解析本任务用到的 YAML 子集；
+  - JSON 配置任何时候都不需要额外依赖。
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ SKIPPED = "SKIPPED"
 TIMEOUT = "TIMEOUT"
 RETRY = "RETRY"
 
+VALID_STATUS = (SUCCESS, FAILED, SKIPPED, TIMEOUT)
+
 # ANSI 颜色：SUCCESS 绿 / FAILED 红 / RETRY 黄 / SKIPPED 蓝
 ANSI_COLORS = {
     SUCCESS: "\033[32m",
@@ -65,6 +72,208 @@ def make_colorizer(enabled: bool):
     return colorize
 
 
+# ---------------------- 内置 YAML 后备解析器 ----------------------
+# 只有在没有安装 PyYAML 时才会用到。支持本任务配置所需的最小 YAML 子集：
+#   * 注释(#)与空行、文档分隔符 --- / ...
+#   * key: value（int/float/bool/null/带引号或不带引号的字符串）
+#   * 行内列表 [a, b, c]
+#   * 缩进映射 与 "- key: value" 形式的映射列表
+# 遇到不支持的写法会抛出可读的 SchedulerError，提示安装 PyYAML。
+
+def _yaml_strip_comment(line: str) -> str:
+    out = []
+    quote = None
+    for ch in line:
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            out.append(ch)
+        elif ch == "#":
+            break
+        else:
+            out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _yaml_split_list(text: str) -> List[str]:
+    parts: List[str] = []
+    cur: List[str] = []
+    quote = None
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch == ",":
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [p.strip() for p in parts if p.strip() != ""]
+
+
+def _yaml_scalar(token: str) -> Any:
+    tok = token.strip()
+    if tok == "":
+        return None
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        return tok[1:-1]
+    low = tok.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    if low in ("null", "~", "none"):
+        return None
+    if tok.startswith("[") and tok.endswith("]"):
+        return [_yaml_scalar(p) for p in _yaml_split_list(tok[1:-1])]
+    try:
+        return int(tok)
+    except ValueError:
+        pass
+    try:
+        return float(tok)
+    except ValueError:
+        pass
+    return tok
+
+
+def _yaml_split_key(content: str):
+    quote = None
+    for idx, ch in enumerate(content):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == ":":
+            return content[:idx].strip(), content[idx + 1:]
+    return content, None
+
+
+def _yaml_is_list_item(content: str) -> bool:
+    return content == "-" or content.startswith("- ")
+
+
+def _yaml_parse_map(lines, i: int, indent: int):
+    mapping: Dict[str, Any] = {}
+    while i < len(lines):
+        ind, content, lineno = lines[i]
+        if ind < indent:
+            break
+        if ind > indent:
+            raise SchedulerError(
+                "YAML 缩进不一致（第 {} 行）: {}".format(lineno, content)
+            )
+        if _yaml_is_list_item(content):
+            break
+        key, rest = _yaml_split_key(content)
+        if rest is None:
+            raise SchedulerError(
+                "后备 YAML 解析器无法解析第 {} 行（应为 key: value）: {}".format(lineno, content)
+            )
+        i += 1
+        rest = rest.strip()
+        if rest == "":
+            if i < len(lines) and lines[i][0] > indent:
+                value, i = _yaml_parse_node(lines, i, lines[i][0])
+            elif i < len(lines) and lines[i][0] == indent and _yaml_is_list_item(lines[i][1]):
+                value, i = _yaml_parse_list(lines, i, indent)
+            else:
+                value = None
+        else:
+            value = _yaml_scalar(rest)
+        mapping[key] = value
+    return mapping, i
+
+
+def _yaml_parse_list(lines, i: int, indent: int):
+    items: List[Any] = []
+    while i < len(lines):
+        ind, content, lineno = lines[i]
+        if ind < indent:
+            break
+        if ind > indent:
+            raise SchedulerError(
+                "YAML 缩进不一致（第 {} 行）: {}".format(lineno, content)
+            )
+        if not _yaml_is_list_item(content):
+            break
+        rest = content[1:].strip()
+        if rest == "":
+            i += 1
+            if i < len(lines) and lines[i][0] > indent:
+                value, i = _yaml_parse_node(lines, i, lines[i][0])
+            else:
+                value = None
+            items.append(value)
+            continue
+        key, sep_rest = _yaml_split_key(rest)
+        if sep_rest is not None and rest[0] not in ("'", '"'):
+            # 列表项本身是一个映射：把 "- " 换成两个空格，再按映射解析
+            lines[i] = (indent + 2, rest, lineno)
+            value, i = _yaml_parse_map(lines, i, indent + 2)
+            items.append(value)
+        else:
+            items.append(_yaml_scalar(rest))
+            i += 1
+    return items, i
+
+
+def _yaml_parse_node(lines, i: int, indent: int):
+    if i >= len(lines):
+        return None, i
+    if _yaml_is_list_item(lines[i][1]):
+        return _yaml_parse_list(lines, i, indent)
+    return _yaml_parse_map(lines, i, indent)
+
+
+def mini_yaml_load(text: str) -> Any:
+    """PyYAML 缺失时的后备解析器（仅支持本任务用到的 YAML 子集）。"""
+    raw = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        stripped = _yaml_strip_comment(line)
+        if stripped.strip() == "":
+            continue
+        bare = stripped.strip()
+        if bare in ("---", "..."):
+            continue
+        leading = stripped[: len(stripped) - len(stripped.lstrip())]
+        if "\t" in leading:
+            raise SchedulerError(
+                "后备 YAML 解析器不支持 Tab 缩进（第 {} 行）。"
+                "请改用空格，或安装 PyYAML: pip install -r requirements.txt".format(lineno)
+            )
+        raw.append((len(leading), bare, lineno))
+    if not raw:
+        raise SchedulerError("配置文件为空或只有注释")
+    value, idx = _yaml_parse_node(raw, 0, raw[0][0])
+    if idx != len(raw):
+        raise SchedulerError(
+            "后备 YAML 解析器无法解析第 {} 行: {}（若 YAML 较复杂，请安装 PyYAML）".format(
+                raw[idx][2], raw[idx][1]
+            )
+        )
+    return value
+
+
+def _load_yaml_text(text: str) -> Any:
+    """优先用 PyYAML；没装则退回内置后备解析器。"""
+    if _HAS_YAML:
+        try:
+            return yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise SchedulerError("YAML 语法错误: {}".format(exc)) from exc
+    return mini_yaml_load(text)
+
+
 # --------------------------- 配置加载与校验 ---------------------------
 
 def load_config(path: str) -> Dict[str, Any]:
@@ -79,6 +288,8 @@ def load_config(path: str) -> Dict[str, Any]:
             text = fh.read()
     except OSError as exc:
         raise SchedulerError("无法读取配置文件 {}: {}".format(path, exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise SchedulerError("配置文件不是 UTF-8 编码: {}".format(path)) from exc
 
     if not text.strip():
         raise SchedulerError("配置文件为空: {}".format(path))
@@ -87,12 +298,7 @@ def load_config(path: str) -> Dict[str, Any]:
     data: Any = None
 
     if ext in (".yaml", ".yml"):
-        if not _HAS_YAML:
-            raise SchedulerError("缺少 PyYAML 依赖，请先执行: pip install -r requirements.txt")
-        try:
-            data = yaml.safe_load(text)
-        except yaml.YAMLError as exc:
-            raise SchedulerError("YAML 语法错误: {}".format(exc)) from exc
+        data = _load_yaml_text(text)
     elif ext == ".json":
         try:
             data = json.loads(text)
@@ -103,14 +309,7 @@ def load_config(path: str) -> Dict[str, Any]:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            if not _HAS_YAML:
-                raise SchedulerError(
-                    "无法解析配置文件 {}：既不是合法 JSON，又缺少 PyYAML".format(path)
-                )
-            try:
-                data = yaml.safe_load(text)
-            except yaml.YAMLError as exc:
-                raise SchedulerError("配置语法错误: {}".format(exc)) from exc
+            data = _load_yaml_text(text)
 
     if data is None:
         raise SchedulerError("配置文件为空或只有注释: {}".format(path))
@@ -359,7 +558,9 @@ def run_scheduler(
 
     if timed_out:
         print(
-            "[{:6.2f}s] {} 总耗时超时，已终止后续任务".format(total_duration, colorize(TIMEOUT, TIMEOUT)),
+            "[{:6.2f}s] {} 总耗时超时，已终止后续任务".format(
+                total_duration, colorize(TIMEOUT, TIMEOUT)
+            ),
             file=stream,
             flush=True,
         )
@@ -416,6 +617,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         config = load_config(args.config)
         tasks = parse_tasks(config)
         timeout = parse_timeout(config, args.timeout)
+        topological_order(tasks)  # 提前校验依赖环/缺失依赖，避免跑一半才报错
     except SchedulerError as exc:
         print("错误: {}".format(exc), file=sys.stderr)
         return 2
