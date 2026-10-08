@@ -1,155 +1,97 @@
 #!/usr/bin/env python3
-"""Compute a Pearson correlation coefficient from a YAML configuration."""
-
-from __future__ import annotations
+"""M0-2 最小可验收版本：读 YAML 配置，算两列数据的 Pearson 相关系数。"""
 
 import argparse
 import csv
 import math
 import sys
 from pathlib import Path
-from typing import Any, Sequence
 
 import yaml
 
 
-class CorrelationError(Exception):
-    """Raised when the configuration or input data is invalid."""
-
-
-def load_config(config_path: Path) -> tuple[Path, str, str]:
-    """Load and validate the YAML configuration."""
-    config_path = config_path.expanduser()
-
-    if not config_path.exists():
-        raise CorrelationError(f"配置文件不存在：{config_path}")
-    if not config_path.is_file():
-        raise CorrelationError(f"配置路径不是文件：{config_path}")
-
-    try:
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise CorrelationError(f"无法读取配置文件：{config_path}") from exc
-    except yaml.YAMLError as exc:
-        raise CorrelationError(f"配置文件 YAML 格式错误：{exc}") from exc
-
-    if not isinstance(raw, dict):
-        raise CorrelationError("配置文件顶层必须是 YAML 映射")
-
-    input_csv = raw.get("input_csv")
-    columns = raw.get("columns")
-
-    if not isinstance(input_csv, str) or not input_csv.strip():
-        raise CorrelationError("配置项 input_csv 必须是非空字符串")
-    if not isinstance(columns, dict):
-        raise CorrelationError("配置项 columns 必须是映射")
-
-    col_x = columns.get("x")
-    col_y = columns.get("y")
-    if not isinstance(col_x, str) or not col_x.strip():
-        raise CorrelationError("配置项 columns.x 必须是非空字符串")
-    if not isinstance(col_y, str) or not col_y.strip():
-        raise CorrelationError("配置项 columns.y 必须是非空字符串")
-
-    csv_path = Path(input_csv)
-    if not csv_path.is_absolute():
-        config_relative = config_path.parent / csv_path
-        cwd_relative = Path.cwd() / csv_path
-        if config_relative.exists():
-            csv_path = config_relative
-        elif cwd_relative.exists():
-            csv_path = cwd_relative
-        else:
-            csv_path = config_relative
-
-    return csv_path, col_x, col_y
-
-
-def load_xy(csv_path: Path, col_x: str, col_y: str) -> tuple[list[float], list[float]]:
-    """Read two numeric columns from a CSV file."""
-    csv_path = csv_path.expanduser()
-
-    if not csv_path.exists():
-        raise CorrelationError(f"输入 CSV 不存在：{csv_path}")
-    if not csv_path.is_file():
-        raise CorrelationError(f"输入路径不是文件：{csv_path}")
-
-    xs: list[float] = []
-    ys: list[float] = []
-
-    try:
-        with csv_path.open("r", encoding="utf-8-sig", newline="") as stream:
-            reader = csv.DictReader(stream)
-            if reader.fieldnames is None:
-                raise CorrelationError("输入 CSV 为空，缺少表头")
-
-            missing = [name for name in (col_x, col_y) if name not in reader.fieldnames]
-            if missing:
-                raise CorrelationError(
-                    "输入 CSV 缺少列：" + ", ".join(missing)
-                )
-
-            for line_number, row in enumerate(reader, start=2):
-                if row.get(col_x) is None or row.get(col_y) is None:
-                    raise CorrelationError(f"CSV 第 {line_number} 行缺少数据")
-                try:
-                    xs.append(float(row[col_x]))
-                    ys.append(float(row[col_y]))
-                except (TypeError, ValueError) as exc:
-                    raise CorrelationError(
-                        f"CSV 第 {line_number} 行包含非数值数据"
-                    ) from exc
-    except csv.Error as exc:
-        raise CorrelationError(f"CSV 格式错误：{exc}") from exc
-    except OSError as exc:
-        raise CorrelationError(f"无法读取 CSV：{csv_path}") from exc
-
-    if len(xs) < 2:
-        raise CorrelationError("至少需要两个有效数据点才能计算相关系数")
-
-    return xs, ys
-
-
-def pearson_correlation(xs: Sequence[float], ys: Sequence[float]) -> float:
-    """Calculate Pearson's r using the covariance/variance definition."""
-    if len(xs) != len(ys):
-        raise CorrelationError("x 和 y 的数据数量不一致")
-    if len(xs) < 2:
-        raise CorrelationError("至少需要两个数据点")
-
+def pearson(xs, ys):
+    """手写 Pearson 相关系数（不调用 numpy），返回 [-1, 1]。"""
     n = len(xs)
+    if n != len(ys) or n < 2:
+        raise ValueError("数据点数量不足，或 x/y 长度不一致")
+
     mean_x = sum(xs) / n
     mean_y = sum(ys) / n
 
-    ss_x = 0.0
-    ss_y = 0.0
-    covariance = 0.0
-
+    ss_x = ss_y = sp = 0.0
     for x, y in zip(xs, ys):
         dx = x - mean_x
         dy = y - mean_y
-        ss_x += dx * dx
-        ss_y += dy * dy
-        covariance += dx * dy
+        ss_x += dx * dx          # Σ(x - x̄)²
+        ss_y += dy * dy          # Σ(y - ȳ)²
+        sp += dx * dy            # Σ(x - x̄)(y - ȳ)
 
     if ss_x == 0.0 or ss_y == 0.0:
-        raise CorrelationError("某一列方差为 0，相关系数没有定义")
+        raise ValueError("某一列取值恒定，方差为 0，相关系数无定义")
 
-    result = covariance / math.sqrt(ss_x * ss_y)
-    return max(-1.0, min(1.0, result))
+    r = sp / math.sqrt(ss_x * ss_y)      # 关键修复：分母要开方
+    return max(-1.0, min(1.0, r))        # 浮点误差钳位到 [-1, 1]
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Read a YAML config and calculate Pearson's r for two CSV columns."
-    )
+def read_config(path):
+    """读 YAML，返回 (csv_path, x 列名, y 列名)。"""
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(cfg, dict):
+        raise ValueError("配置文件顶层必须是 YAML 映射")
+
+    csv_name = cfg.get("input_csv")
+    cols = cfg.get("columns")
+    if not isinstance(csv_name, str) or not isinstance(cols, dict):
+        raise ValueError("配置缺少 input_csv 或 columns 字段")
+
+    x_name, y_name = cols.get("x"), cols.get("y")
+    if not isinstance(x_name, str) or not isinstance(y_name, str):
+        raise ValueError("配置 columns 必须包含字符串 x 和 y")
+
+    csv_path = Path(csv_name)
+    if not csv_path.is_absolute():
+        # 相对路径：优先相对配置文件所在目录，其次相对当前工作目录
+        near_config = path.parent / csv_path
+        near_cwd = Path.cwd() / csv_path
+        if near_config.exists():
+            csv_path = near_config
+        elif near_cwd.exists():
+            csv_path = near_cwd
+        else:
+            csv_path = near_config
+    return csv_path, x_name, y_name
+
+
+def read_xy(csv_path, x_name, y_name):
+    """读 CSV 指定两列，转成两个 float 列表。"""
+    if not csv_path.is_file():
+        raise ValueError(f"输入 CSV 不存在：{csv_path}")
+
+    xs, ys = [], []
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError("CSV 为空或缺少表头")
+        for col in (x_name, y_name):
+            if col not in reader.fieldnames:
+                raise ValueError(f"CSV 缺少列：{col}")
+        for line_no, row in enumerate(reader, start=2):
+            try:
+                xs.append(float(row[x_name]))
+                ys.append(float(row[y_name]))
+            except (TypeError, ValueError):
+                raise ValueError(f"CSV 第 {line_no} 行不是有效数值")
+
+    if len(xs) < 2:
+        raise ValueError("有效数据点少于 2 个")
+    return xs, ys
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="计算两列数据的 Pearson 相关系数")
     parser.add_argument("config_pos", nargs="?", help="YAML 配置文件路径")
     parser.add_argument("--config", dest="config_opt", help="YAML 配置文件路径")
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
     args = parser.parse_args(argv)
 
     config_name = args.config_opt or args.config_pos
@@ -157,26 +99,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("请通过 --config 或位置参数提供配置文件")
 
     try:
-        csv_path, col_x, col_y = load_config(Path(config_name))
-        xs, ys = load_xy(csv_path, col_x, col_y)
-        n = len(xs)
-        mean_x = sum(xs) / n
-        mean_y = sum(ys) / n
-        r = pearson_correlation(xs, ys)
-    except CorrelationError as exc:
+        cfg_path = Path(config_name).expanduser()
+        if not cfg_path.is_file():
+            raise ValueError(f"配置文件不存在：{cfg_path}")
+        csv_path, x_name, y_name = read_config(cfg_path)
+        xs, ys = read_xy(csv_path, x_name, y_name)
+        n, mean_x = len(xs), sum(xs) / len(xs)
+        mean_y = sum(ys) / len(ys)
+        r = pearson(xs, ys)
+    except Exception as exc:                    # 统一收口，绝不抛 Traceback
         print(f"错误：{exc}", file=sys.stderr)
-        return 2
-    except OSError as exc:
-        print(f"错误：文件操作失败：{exc}", file=sys.stderr)
-        return 2
-    except Exception as exc:
-        print(f"错误：未预期的失败：{exc}", file=sys.stderr)
         return 2
 
     print(f"n = {n}")
     print(f"mean_x = {mean_x}")
     print(f"mean_y = {mean_y}")
-    print(f"r = {r}")
+    print(f"r = {r}")                           # 验收契约行
     return 0
 
 
