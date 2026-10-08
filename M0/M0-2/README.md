@@ -1,18 +1,20 @@
 # M0-2 ｜ 首个代码工具
 
-本项目把官方提供的原始脚本 `legacy_corr.py` 重构为一个可维护的命令行工具。
-现在入口文件是 `corr_tool.py`，它会读取 YAML 配置和 CSV 数据，计算两列数据的
-Pearson 相关系数。
+把官方原始脚本 `legacy_corr.py` 重构为一个可维护的命令行工具。入口文件是
+`corr_tool.py`：读取 YAML 配置和 CSV 数据，**手写**计算两列数据的 Pearson 相关系数。
 
 ## 修复内容
 
-- 将配置读取、CSV 读取、相关性计算拆分为独立函数。
-- 修正 Pearson 相关系数公式，分母使用 `sqrt(sum_x2 * sum_y2)`。
-- 检测空文件、缺少列、非数值、样本不足和零方差。
-- 增加 `if __name__ == "__main__"` 保护。
-- 增加 `--config` 参数和位置参数两种调用方式。
-- 异常情况下输出可读错误并以非零状态码退出，不打印 Python traceback。
-- 增加单元测试，覆盖正相关、负相关、零方差、缺列和 CLI 输出。
+对照 `legacy_corr.py`，本版本做了以下修改：
+
+- 将配置读取、CSV 读取、相关系数计算拆分为独立函数，核心计算封在 `pearson()`。
+- 修正 Pearson 相关系数公式：原脚本分母写成 `dx * dy`，漏了开方，正确应为
+  `sqrt(Σ(x-x̄)² × Σ(y-ȳ)²)`（也就是 `math.sqrt(ss_x * ss_y)`）。
+- 补充异常处理：文件不存在、空文件、列名不匹配、非数值、样本不足、某一列方差为 0。
+- 增加 `if __name__ == "__main__"` 保护，被 import 时不会执行主流程。
+- 增加 `--config` 参数，同时保留位置参数写法。
+- 异常时输出可读错误到 stderr 并以非 0 退出码结束，不打印 Python traceback。
+- 增加单元测试，覆盖正相关、负相关、零方差、缺列、空文件、非数值。
 
 ## 环境准备
 
@@ -26,25 +28,18 @@ pip install -r requirements.txt
 
 ## 运行方式
 
-显式指定配置文件：
-
 ```bash
-python3 corr_tool.py --config config.yaml
+python3 corr_tool.py --config config.yaml   # 验收方式
+python3 corr_tool.py config.yaml            # 位置参数（可选）
 ```
 
-使用位置参数：
-
-```bash
-python3 corr_tool.py config.yaml
-```
-
-示例输出：
+对示例数据 `sample_data.csv` 的实际输出：
 
 ```text
 n = 40
-mean_x = 49.515
-mean_y = 43.201
-r = 0.8321
+mean_x = 49.437825
+mean_y = 43.310725000000005
+r = 0.563474725452484
 ```
 
 程序保证 stdout 中包含一行：
@@ -102,3 +97,9 @@ python3 -m unittest discover -s tests -v
 
 - `0`：计算成功。
 - `2`：配置、CSV 或数据错误。
+
+## AI 使用说明
+
+本题使用 AI（Codex）协助定位 `legacy_corr.py` 中"分母漏开方"的公式错误、整理函数结构、
+起草测试与本文档。核心计算 `pearson()` 经逐行核对，并与标准库 `statistics.correlation`
+对照，差值约 1.1e-16（远小于验收容差 1e-6）。
