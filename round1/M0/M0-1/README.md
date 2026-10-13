@@ -147,6 +147,29 @@ code --version
 code --list-extensions --show-versions
 ```
 
+在 VMware Ubuntu 22.04.5（主机名 `regalem`）实测：
+
+```text
+$ code --version
+1.139.1
+
+# 必需插件检测结果
+OK    ms-python.python
+OK    ms-vscode.cpptools
+OK    ms-vscode-remote.remote-wsl
+OK    ms-vscode-remote.remote-ssh
+结果：4 个必需插件全部已安装
+```
+
+四个必要插件全部存在：
+
+| 插件 ID | 作用 | 状态 |
+| :-- | :-- | :--: |
+| `ms-python.python` | Python 语言支持 | ✅ |
+| `ms-vscode.cpptools` | C/C++ 语言支持与调试 | ✅ |
+| `ms-vscode-remote.remote-wsl` | Remote - WSL | ✅ |
+| `ms-vscode-remote.remote-ssh` | Remote - SSH | ✅ |
+
 必要插件包括：
 
 ```bash
